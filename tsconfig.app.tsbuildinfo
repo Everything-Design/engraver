@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/components/controls.tsx","./src/engine/engrave.ts","./src/engine/engrave.worker.ts","./src/engine/field.ts","./src/engine/presets.ts","./src/engine/streamlines.ts","./src/render/strokecanvas.ts"],"version":"5.9.3"}

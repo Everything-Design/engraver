@@ -16,6 +16,9 @@ function toFieldImageData(image: ImageBitmap, longSide: number) {
   const cv = document.createElement('canvas')
   cv.width = w; cv.height = h
   const ctx = cv.getContext('2d', { willReadFrequently: true })!
+  // Composite onto white so transparent PNG cut-outs read as bare paper, not black.
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, w, h)
   ctx.drawImage(image, 0, 0, w, h)
   return ctx.getImageData(0, 0, w, h)
 }
@@ -121,22 +124,47 @@ export default function App() {
     })
   }, [scheduleRecompute])
 
+  // Shared: classify, build the working ImageData, apply the matched preset (which recomputes).
+  const processBitmap = useCallback((bitmap: ImageBitmap) => {
+    const detected = classifyImage(bitmap)
+    sourceRef.current = toFieldImageData(bitmap, FIELD_LONG)
+    setAutoStyle(detected)
+    setHasImage(true)
+    applyStyle(detected)
+  }, [applyStyle])
+
   const handleUpload = useCallback(async (file: File) => {
     setError(null)
     setBusy(true)
     try {
-      const bitmap = await createImageBitmap(file)
-      const detected = classifyImage(bitmap)
-      sourceRef.current = toFieldImageData(bitmap, FIELD_LONG)
-      setAutoStyle(detected)
-      setHasImage(true)
-      applyStyle(detected) // applies preset + triggers recompute
+      processBitmap(await createImageBitmap(file))
     } catch (e) {
       setError('Could not load that image. Try a PNG or JPG.')
       setBusy(false)
       console.error(e)
     }
-  }, [applyStyle])
+  }, [processBitmap])
+
+  // Auto-load a bundled default image on first open so the page isn't blank.
+  const defaultLoadedRef = useRef(false)
+  useEffect(() => {
+    if (defaultLoadedRef.current) return
+    defaultLoadedRef.current = true
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('default.png')
+        if (!res.ok || cancelled) return
+        const bitmap = await createImageBitmap(await res.blob())
+        if (cancelled) return
+        setBusy(true)
+        processBitmap(bitmap)
+      } catch {
+        /* no default available — page stays on the upload prompt */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [processBitmap])
 
   // Export: re-render the streamlines at high resolution to a fresh canvas.
   const handleExport = useCallback(async () => {

@@ -97,5 +97,27 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
     strokes = primary.concat(cross)
   }
 
+  // Contour set: bold outlines traced ALONG strong edges (drawn last, on top).
+  if (s.edgeStrength > 0.01) {
+    const edgeThresh = 0.42 - 0.27 * s.edgeStrength // higher edgeStrength -> lower thresh -> more contour
+    const contour = placeStreamlines(field, darkness, {
+      basePitch: Math.max(2, s.basePitch * 0.8),
+      spacingRatio: s.spacingRatio,
+      strokeWidth: s.strokeWidth,
+      swell: 0,
+      latticeJitter: 0,
+      flowWeight: 1,
+      baseAngle,
+      edgeBreakDist: s.edgeBreakDist,
+      angleOffset: 0,
+      darknessGate: 0,
+      rng,
+      mode: 'contour',
+      edgeThresh,
+      contourWidth: s.strokeWidth * (1.1 + 0.7 * s.edgeStrength),
+    })
+    strokes = strokes.concat(contour)
+  }
+
   return { w, h, strokes }
 }

@@ -4,6 +4,11 @@
 // of the orientation field, so the result describes the form natively. The proximity test
 // excludes a streamline's OWN recent samples (by id + sample order) — otherwise every line
 // would reject its own previous point and die instantly.
+//
+// CONTOUR mode (mode:'contour') reuses the same machinery to trace boundary outlines: it
+// seeds on strong edges, follows the edge tangent (which the field already aligns with),
+// does NOT break at edges, uses fixed spacing, and does not spawn parallel neighbours — so
+// it lays a single bold line along each silhouette/feature boundary.
 
 import { Field } from './field'
 
@@ -25,6 +30,9 @@ export interface PlaceParams {
   angleOffset: number // radians (π/2 for cross-hatch)
   darknessGate: number
   rng: () => number
+  mode?: 'tone' | 'contour'
+  edgeThresh?: number // contour: edge strength to trace
+  contourWidth?: number // contour: line width
 }
 
 const H = 0.9 // integration step (px)
@@ -35,6 +43,8 @@ const EDGE_BREAK = 0.34
 
 export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceParams): Stroke[] {
   const { w, h } = field
+  const isContour = p.mode === 'contour'
+  const edgeThresh = p.edgeThresh ?? 0.35
   const fixedX = Math.cos(p.baseAngle)
   const fixedY = Math.sin(p.baseAngle)
   const cosO = Math.cos(p.angleOffset)
@@ -48,8 +58,10 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
   }
   const darknessAt = (x: number, y: number) => darkness[sampleIdx(x, y)]
   const edgeAt = (x: number, y: number) => field.edge[sampleIdx(x, y)]
-  const sepAt = (x: number, y: number) => p.basePitch * Math.pow(p.spacingRatio, -darknessAt(x, y))
+  const sepAt = (x: number, y: number) =>
+    isContour ? p.basePitch : p.basePitch * Math.pow(p.spacingRatio, -darknessAt(x, y))
   const inkable = (x: number, y: number) => {
+    if (isContour) return edgeAt(x, y) > edgeThresh
     const d = darknessAt(x, y)
     return d > INK_EPS && d >= p.darknessGate
   }
@@ -57,7 +69,7 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
   const dirAt = (x: number, y: number, ox: number, oy: number) => {
     const i = sampleIdx(x, y)
     const tx = field.dirx[i], ty = field.diry[i]
-    const wgt = p.flowWeight * field.coh[i]
+    const wgt = isContour ? 1 : p.flowWeight * field.coh[i]
     const bx = fixedX * (1 - wgt) + tx * wgt
     const by = fixedY * (1 - wgt) + ty * wgt
     const rx = bx * cosO - by * sinO
@@ -85,7 +97,6 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
     c.push(ptsX.length)
     ptsX.push(x); ptsY.push(y); ptsId.push(id); ptsOrd.push(ord)
   }
-  // True if (x,y) is within minDist of any point that is NOT this streamline's own recent sample.
   const tooClose = (x: number, y: number, minDist: number, id: number, ord: number, skip: number) => {
     const md2 = minDist * minDist
     const r = Math.ceil(minDist / cell)
@@ -112,7 +123,6 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
   const seeds: number[] = []
   let nextId = 0
 
-  // Integrate one direction; adds samples to the grid and returns the path points.
   const integrate = (sx: number, sy: number, sign: number, id: number, ord0: number, ordStep: number, includeStart: boolean): number[] => {
     const path: number[] = []
     let x = sx, y = sy
@@ -124,7 +134,7 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
     for (let step = 0; step < MAX_STEPS; step++) {
       if (x < 0 || y < 0 || x >= w || y >= h) break
       if (!inkable(x, y)) break
-      if (step > 1 && edgeAt(x, y) > EDGE_BREAK) break
+      if (!isContour && step > 1 && edgeAt(x, y) > EDGE_BREAK) break
       const sep = sepAt(x, y)
       const skip = Math.ceil((sep * 2) / H) + 4
       if (tooClose(x, y, sep * D_TEST, id, ord, skip)) break
@@ -160,12 +170,18 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
     let o = 0
     for (let i = bwd.length - 2; i >= 0; i -= 2) { xs[o] = bwd[i]; ys[o] = bwd[i + 1]; o++ }
     for (let i = 0; i < fwd.length; i += 2) { xs[o] = fwd[i]; ys[o] = fwd[i + 1]; o++ }
+    const cw = p.contourWidth ?? p.strokeWidth
     for (let i = 0; i < n; i++) {
-      const d = darknessAt(xs[i], ys[i])
-      ws[i] = Math.max(0.15, p.strokeWidth * (1 + p.swell * (d - 0.5)))
+      if (isContour) {
+        ws[i] = cw
+      } else {
+        const d = darknessAt(xs[i], ys[i])
+        ws[i] = Math.max(0.15, p.strokeWidth * (1 + p.swell * (d - 0.5)))
+      }
     }
     strokes.push({ x: xs, y: ys, w: ws })
 
+    if (isContour) return // contours don't spawn parallel neighbours
     // Spawn candidate seeds perpendicular to the line (jittered) for the next placements.
     for (let i = 0; i < n; i += 2) {
       const ax = xs[i], ay = ys[i]
@@ -182,12 +198,21 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
     }
   }
 
-  // Coarse darkness-ordered grid seeds (coverage); grown candidates do the even spacing.
+  // Initial seeds: contour seeds on strong edges; tone seeds on a coarse darkness grid.
   const initial: Array<[number, number, number]> = []
-  const gstep = Math.max(2, Math.round(p.basePitch))
-  for (let y = 0; y < h; y += gstep) {
-    for (let x = 0; x < w; x += gstep) {
-      if (inkable(x, y)) initial.push([darknessAt(x, y), x, y])
+  if (isContour) {
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        const e = edgeAt(x, y)
+        if (e > edgeThresh) initial.push([e, x, y])
+      }
+    }
+  } else {
+    const gstep = Math.max(2, Math.round(p.basePitch))
+    for (let y = 0; y < h; y += gstep) {
+      for (let x = 0; x < w; x += gstep) {
+        if (inkable(x, y)) initial.push([darknessAt(x, y), x, y])
+      }
     }
   }
   initial.sort((a, b) => b[0] - a[0])

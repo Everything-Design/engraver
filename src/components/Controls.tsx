@@ -14,6 +14,8 @@ interface Props {
   onSelectStyle: (key: StyleKey) => void
   format: 'image/png' | 'image/jpeg' | 'image/svg+xml'
   onFormatChange: (f: 'image/png' | 'image/jpeg' | 'image/svg+xml') => void
+  onSavePreset: () => void
+  onLoadPreset: (file: File) => void
   busy: boolean
 }
 
@@ -150,6 +152,13 @@ export function Controls(p: Props) {
         <button className="export" disabled={!p.hasImage || p.busy} onClick={p.onExport}>
           {p.busy ? 'Working…' : `Export ${p.format === 'image/png' ? 'PNG' : p.format === 'image/jpeg' ? 'JPG' : 'SVG'}`}
         </button>
+        <div className="seg" style={{ marginTop: 8 }}>
+          <button className="seg__btn" onClick={p.onSavePreset}>Save preset</button>
+          <label className="seg__btn" style={{ cursor: 'pointer', textAlign: 'center' }}>
+            Load preset
+            <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && p.onLoadPreset(e.target.files[0])} />
+          </label>
+        </div>
       </section>
     </aside>
   )

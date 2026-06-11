@@ -223,6 +223,29 @@ export default function App() {
     downloadBlob(blob, format === 'image/png' ? 'engraving.png' : 'engraving.jpg')
   }, [format])
 
+  // Save / load the full parameter set as JSON (a reusable "base preset").
+  const handleSavePreset = useCallback(() => {
+    downloadBlob(
+      new Blob([JSON.stringify(paramsRef.current, null, 2)], { type: 'application/json' }),
+      'engraver-preset.json',
+    )
+  }, [])
+
+  const handleLoadPreset = useCallback(async (file: File) => {
+    try {
+      const obj = JSON.parse(await file.text())
+      if (obj && obj.structure && obj.style) {
+        setStyle(null)
+        setParams(obj)
+        scheduleRecompute(obj.structure)
+      } else {
+        setError('That JSON is not an Engraver preset.')
+      }
+    } catch {
+      setError('Could not read that preset file.')
+    }
+  }, [scheduleRecompute])
+
   useEffect(() => {
     const onResize = () => render()
     window.addEventListener('resize', onResize)
@@ -243,6 +266,8 @@ export default function App() {
         onSelectStyle={applyStyle}
         format={format}
         onFormatChange={setFormat}
+        onSavePreset={handleSavePreset}
+        onLoadPreset={handleLoadPreset}
         busy={busy}
       />
       <main className="stage" ref={stageRef}>

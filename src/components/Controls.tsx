@@ -12,8 +12,8 @@ interface Props {
   style: StyleKey | null
   autoStyle: StyleKey | null
   onSelectStyle: (key: StyleKey) => void
-  format: 'image/png' | 'image/jpeg'
-  onFormatChange: (f: 'image/png' | 'image/jpeg') => void
+  format: 'image/png' | 'image/jpeg' | 'image/svg+xml'
+  onFormatChange: (f: 'image/png' | 'image/jpeg' | 'image/svg+xml') => void
   busy: boolean
 }
 
@@ -145,9 +145,10 @@ export function Controls(p: Props) {
         <div className="seg">
           <button className={'seg__btn' + (p.format === 'image/png' ? ' seg__btn--active' : '')} onClick={() => p.onFormatChange('image/png')}>PNG</button>
           <button className={'seg__btn' + (p.format === 'image/jpeg' ? ' seg__btn--active' : '')} onClick={() => p.onFormatChange('image/jpeg')}>JPG</button>
+          <button className={'seg__btn' + (p.format === 'image/svg+xml' ? ' seg__btn--active' : '')} onClick={() => p.onFormatChange('image/svg+xml')}>SVG</button>
         </div>
         <button className="export" disabled={!p.hasImage || p.busy} onClick={p.onExport}>
-          {p.busy ? 'Working…' : `Export ${p.format === 'image/png' ? 'PNG' : 'JPG'}`}
+          {p.busy ? 'Working…' : `Export ${p.format === 'image/png' ? 'PNG' : p.format === 'image/jpeg' ? 'JPG' : 'SVG'}`}
         </button>
       </section>
     </aside>

@@ -23,6 +23,39 @@ function toFieldImageData(image: ImageBitmap, longSide: number) {
   return ctx.getImageData(0, 0, w, h)
 }
 
+// Build a vector SVG from packed strokes (mean width per stroke, field-resolution viewBox).
+function buildSVG(packed: PackedStrokes, ink: string, paper: string): string {
+  const { w, h, coords, widths, lengths } = packed
+  const out: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
+    `<rect width="${w}" height="${h}" fill="${paper}"/>`,
+    `<g stroke="${ink}" fill="none" stroke-linecap="round" stroke-linejoin="round">`,
+  ]
+  let vi = 0
+  for (let si = 0; si < lengths.length; si++) {
+    const n = lengths[si]
+    if (n < 2) { vi += n; continue }
+    let wsum = 0
+    for (let i = 0; i < n; i++) wsum += widths[vi + i]
+    const lw = Math.max(0.2, wsum / n)
+    let d = `M${coords[vi * 2].toFixed(1)} ${coords[vi * 2 + 1].toFixed(1)}`
+    for (let i = 1; i < n; i++) d += `L${coords[(vi + i) * 2].toFixed(1)} ${coords[(vi + i) * 2 + 1].toFixed(1)}`
+    out.push(`<path d="${d}" stroke-width="${lw.toFixed(2)}"/>`)
+    vi += n
+  }
+  out.push('</g></svg>')
+  return out.join('')
+}
+
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -37,7 +70,7 @@ export default function App() {
   paramsRef.current = params
   const [style, setStyle] = useState<StyleKey | null>(null)
   const [autoStyle, setAutoStyle] = useState<StyleKey | null>(null)
-  const [format, setFormat] = useState<'image/png' | 'image/jpeg'>('image/png')
+  const [format, setFormat] = useState<'image/png' | 'image/jpeg' | 'image/svg+xml'>('image/png')
   const [hasImage, setHasImage] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -170,6 +203,14 @@ export default function App() {
   const handleExport = useCallback(async () => {
     const packed = packedRef.current
     if (!packed) return
+    const { ink, paper } = paramsRef.current.style
+
+    if (format === 'image/svg+xml') {
+      const svg = buildSVG(packed, ink, paper)
+      downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), 'engraving.svg')
+      return
+    }
+
     const aspect = packed.w / packed.h
     const longSide = EXPORT_LONG
     const w = aspect >= 1 ? longSide : Math.round(longSide * aspect)
@@ -179,12 +220,7 @@ export default function App() {
     drawEngraving(cv, packed, paramsRef.current.style)
     const blob = await new Promise<Blob | null>((res) => cv.toBlob(res, format, 0.95))
     if (!blob) return
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = format === 'image/png' ? 'engraving.png' : 'engraving.jpg'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(blob, format === 'image/png' ? 'engraving.png' : 'engraving.jpg')
   }, [format])
 
   useEffect(() => {

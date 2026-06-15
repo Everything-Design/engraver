@@ -23,15 +23,15 @@ export function mapToParams(s: ImageStats): AutoResult {
 
   const planarRegions = s.axisRatio > 0.5 && s.skinRatio < 0.08
   const isPortrait = s.skinRatio > 0.12
+  const subjKey = s.subjectMean // tone of the SUBJECT (ignores a bright/empty background)
 
-  // Auto-levels — keep highlights BARE so the subject reads; don't crush shadows to mud.
-  const blackPoint = clamp(s.p2 - 0.02, 0, 0.26)
+  const blackPoint = clamp(s.p2 - 0.02, 0, 0.24)
   const highlightClip =
     s.bgKind === 'light-uniform'
-      ? clamp(Math.min(s.bgLum - 0.04, s.p98), 0.55, 0.96)
-      : clamp(s.p98, 0.55, 0.96)
-  const gamma = clamp(0.7 + (0.5 - s.key) * 1.0, 0.6, 1.5)
-  // More tonal levels = finer gradation = faces/hands stay legible (avoids chunky banding).
+      ? clamp(Math.min(s.bgLum - 0.05, s.p98), 0.6, 0.97)
+      : clamp(s.p98, 0.6, 0.97)
+  // gamma>1 = more ink. Bright subject -> darken (more lines); dark subject -> lift.
+  const gamma = clamp(0.95 + (subjKey - 0.5) * 0.9, 0.65, 1.5)
   const tonalLevels = isPortrait ? 10 : Math.round(lerp(6, 9, smoothness))
 
   const structure: StructureParams = {
@@ -39,21 +39,20 @@ export function mapToParams(s: ImageStats): AutoResult {
     blackPoint,
     highlightClip,
     gamma,
-    // Looser spacing + THINNER strokes => more bare paper between lines => detail survives.
-    basePitch: isPortrait ? lerp(6.5, 5, s.busyness) : lerp(10, 6.5, s.busyness),
-    spacingRatio: lerp(3.5, 6, s.dynRange),
-    strokeWidth: s.key < 0.4 ? 0.72 : 0.58,
+    // Dense enough to MODEL the form; bold enough to read at preview size.
+    basePitch: isPortrait ? lerp(4.5, 3.4, s.busyness) : lerp(8, 5, s.busyness),
+    spacingRatio: lerp(3, 5, s.dynRange),
+    strokeWidth: subjKey < 0.4 ? 1.05 : 0.9,
     swell: planarRegions ? 0.25 : 0.35,
-    latticeJitter: lerp(0.25, 0.4, smoothness),
-    flowWeight: planarRegions ? 0.5 : lerp(0.7, 0.92, 1 - s.axisRatio),
+    latticeJitter: lerp(0.2, 0.35, smoothness),
+    flowWeight: planarRegions ? 0.5 : lerp(0.72, 0.92, 1 - s.axisRatio),
     baseAngle: planarRegions ? clamp(s.dominantAngleDeg, 0, 180) : isPortrait ? 0 : 35,
     planarRegions,
-    flowSmoothness: lerp(0.45, 0.85, 1 - s.axisRatio),
-    // Much less cross-hatch (esp. skin) so faces don't fill into a dark mesh.
-    crossHatch: clamp(s.shadowFraction * (isPortrait ? 0.7 : 1.1), 0.05, isPortrait ? 0.35 : 0.6),
-    stippleTransition: clamp(s.midSmoothFraction, 0.2, 0.7),
-    // Selective, light contours so fingers/wrinkles aren't over-drawn.
-    edgeStrength: isPortrait ? clamp(0.42 - s.busyness * 0.5, 0.16, 0.38) : clamp(0.58 - s.busyness, 0.2, 0.58),
+    flowSmoothness: lerp(0.5, 0.85, 1 - s.axisRatio),
+    crossHatch: clamp(s.shadowFraction * (isPortrait ? 0.9 : 1.1), 0.12, isPortrait ? 0.5 : 0.65),
+    // Keep lines CONTINUOUS — only a touch of stipple, or faces turn to scattered dots.
+    stippleTransition: clamp(s.midSmoothFraction * 0.3, 0, 0.2),
+    edgeStrength: isPortrait ? clamp(0.45 - s.busyness * 0.4, 0.25, 0.45) : clamp(0.58 - s.busyness, 0.2, 0.58),
     edgeBreakDist: 1.5,
   }
 

@@ -39,7 +39,7 @@ const H = 0.9 // integration step (px)
 const D_TEST = 0.8 // reject closer than D_TEST * local separation
 const MAX_STEPS = 2200
 const INK_EPS = 0.02
-const EDGE_BREAK = 0.34
+const EDGE_BREAK = 0.5 // only strong silhouette edges break hatch (keeps lines continuous over soft features)
 
 export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceParams): Stroke[] {
   const { w, h } = field

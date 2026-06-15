@@ -13,6 +13,7 @@ export interface ImageStats {
   bgVar: number
   bgKind: 'light-uniform' | 'dark-uniform' | 'busy'
   subjectCoverage: number
+  subjectMean: number // mean luminance of the SUBJECT only (ignores empty background)
   busyness: number
   axisRatio: number
   skinRatio: number
@@ -89,8 +90,9 @@ export function analyze(image: ImageBitmap, maxDim = 180): ImageStats {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (onBorder(x, y)) { const d = lum[y * w + x] - bgLum; bVar += d * d }
   bVar = bN ? bVar / bN : 0
 
-  let subj = 0
-  for (let i = 0; i < n; i++) if (Math.abs(lum[i] - bgLum) > 0.12) subj++
+  let subj = 0, subjSum = 0
+  for (let i = 0; i < n; i++) if (Math.abs(lum[i] - bgLum) > 0.12) { subj++; subjSum += lum[i] }
+  const subjectMean = subj ? subjSum / subj : mean
 
   // Sobel pass -> busyness, axis ratio, dominant angle, smooth mid-tones.
   const at = (x: number, y: number) => lum[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))]
@@ -126,7 +128,7 @@ export function analyze(image: ImageBitmap, maxDim = 180): ImageStats {
 
   return {
     p2, p50, p98, mean, std, dynRange: p98 - p2, key: mean,
-    bgLum, bgVar: bVar, bgKind, subjectCoverage: subj / n,
+    bgLum, bgVar: bVar, bgKind, subjectCoverage: subj / n, subjectMean,
     busyness, axisRatio, skinRatio: skin / n, sat, hue, warm: hue < 60 || hue > 300,
     shadowFraction: shadow / n, midSmoothFraction, dominantAngleDeg,
   }

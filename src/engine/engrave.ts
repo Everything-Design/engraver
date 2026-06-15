@@ -189,9 +189,9 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
 
   // Contour set: bold outlines traced ALONG strong edges (drawn last, on top).
   if (s.edgeStrength > 0.01) {
-    const edgeThresh = 0.42 - 0.27 * s.edgeStrength
+    const edgeThresh = 0.52 - 0.2 * s.edgeStrength // higher = only strong silhouette edges
     const contour = placeStreamlines(field, darkness, {
-      basePitch: Math.max(2, s.basePitch * 0.8),
+      basePitch: Math.max(2.5, s.basePitch * 0.9),
       spacingRatio: s.spacingRatio,
       strokeWidth: s.strokeWidth,
       swell: 0,
@@ -204,7 +204,7 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
       rng,
       mode: 'contour',
       edgeThresh,
-      contourWidth: s.strokeWidth * (1.1 + 0.7 * s.edgeStrength),
+      contourWidth: s.strokeWidth * (1.0 + 0.4 * s.edgeStrength),
     })
     strokes = strokes.concat(contour)
   }

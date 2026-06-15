@@ -4,7 +4,7 @@
   --card: #e9edf2;
   --card-line: #dde2e9;
   --ink: #11151a;
-  --muted: #6b7480;
+  --muted: #565e6a; /* Q21: darkened for WCAG AA contrast on the panel background */
   --track: #cfd5dd;
   --fill: #11151a;
   --mono: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, Consolas, monospace;
@@ -16,10 +16,26 @@
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
 
+/* Q21: visible keyboard focus across all interactive controls. */
+:focus-visible { outline: 2px solid #2b6cff; outline-offset: 2px; border-radius: 4px; }
+
 .app {
   display: grid;
   grid-template-columns: 340px 1fr;
   height: 100vh;
+  height: 100dvh; /* Q22: avoid mobile URL-bar clipping */
+}
+
+/* Q2: top-level unsupported/crash fallback. */
+.fatal {
+  max-width: 480px; margin: 18vh auto 0; padding: 0 24px; text-align: center;
+  font-family: var(--sans); color: var(--ink);
+}
+.fatal h1 { font-size: 22px; margin: 0 0 12px; }
+.fatal p { font-size: 14px; line-height: 1.6; color: var(--muted); }
+.fatal button {
+  margin-top: 18px; padding: 11px 22px; border: none; border-radius: 12px;
+  background: var(--ink); color: #fff; font-weight: 600; font-size: 14px; cursor: pointer;
 }
 
 /* ---- Panel ---- */
@@ -72,7 +88,7 @@ body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antiali
   -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 6px;
   background: linear-gradient(to right,
     var(--ink) 0%, #4a525c var(--fill), var(--track) var(--fill), var(--track) 100%);
-  outline: none; cursor: pointer;
+  cursor: pointer; touch-action: none; /* Q21: let touch drag the slider, not scroll the panel */
 }
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
@@ -141,8 +157,70 @@ body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antiali
   position: relative; display: grid; place-items: center; overflow: hidden;
   background: radial-gradient(circle at 50% 35%, #f4f6f9, var(--bg-2));
 }
-.stage__canvas { box-shadow: 0 30px 70px rgba(30,45,70,0.16); border-radius: 4px; background: #fff; }
+.stage__canvas-wrap { position: relative; line-height: 0; }
+.stage__canvas {
+  box-shadow: 0 30px 70px rgba(30,45,70,0.16); border-radius: 4px; background: #fff;
+  touch-action: none; cursor: zoom-in; /* Q11: hold-to-compare */
+}
+/* Q11: source overlay, exactly over the engraving canvas. */
+.stage__compare {
+  position: absolute; inset: 0; border-radius: 4px;
+  box-shadow: 0 30px 70px rgba(30,45,70,0.16); background: #fff; pointer-events: none;
+}
 .stage__empty { text-align: center; color: var(--muted); display: flex; flex-direction: column; gap: 10px; max-width: 340px; }
 .stage__empty p { font-size: 17px; margin: 0; color: var(--ink); font-weight: 600; }
 .stage__empty span { font-size: 12.5px; line-height: 1.5; }
-.stage__error { color: #c0492f; font-size: 14px; }
+.stage__error {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 5;
+  color: #fff; background: #c0492f; font-size: 13px; padding: 9px 14px; border-radius: 9px;
+  max-width: 80%; box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+
+/* Q12: auto-tune notes as a dismissible panel. */
+.stage__notes {
+  position: absolute; top: 14px; left: 14px; right: 14px; z-index: 4; font-size: 11px;
+  color: #4a525c; background: rgba(255,255,255,0.9); padding: 8px 30px 8px 12px;
+  border-radius: 10px; line-height: 1.45; box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+}
+.stage__notes-close {
+  position: absolute; top: 4px; right: 6px; border: none; background: none; cursor: pointer;
+  font-size: 17px; line-height: 1; color: var(--muted); padding: 2px 5px; border-radius: 6px;
+}
+.stage__notes-close:hover { color: var(--ink); background: rgba(0,0,0,0.05); }
+
+.stage__hint {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: var(--muted); background: rgba(255,255,255,0.7);
+  padding: 5px 11px; border-radius: 8px; pointer-events: none;
+}
+.stage__toast {
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%); z-index: 6;
+  font-size: 12px; color: #fff; background: var(--ink); padding: 8px 14px; border-radius: 9px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+}
+.stage--drag { outline: 3px dashed #2b6cff; outline-offset: -10px; }
+.stage__drop {
+  position: absolute; inset: 0; display: grid; place-items: center; z-index: 7;
+  background: rgba(43,108,255,0.08); font-size: 18px; font-weight: 600; color: #2b6cff;
+  pointer-events: none;
+}
+
+/* Undo / redo / reset toolbar (Q10) */
+.toolbar { display: flex; gap: 6px; }
+.tool {
+  flex: 1; padding: 9px 6px; border: 1px solid var(--card-line); border-radius: 10px;
+  background: #fff; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--ink);
+}
+.tool:hover:not(:disabled) { box-shadow: 0 3px 10px rgba(20,30,50,0.07); }
+.tool:disabled { opacity: 0.4; cursor: not-allowed; }
+.seg__btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Q22: collapse the panel into a bottom drawer on narrow screens. */
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .stage { grid-row: 1; }
+  .panel {
+    grid-row: 2; max-height: 52dvh; flex-direction: column;
+    border-top: 1px solid var(--card-line); box-shadow: 0 -8px 24px rgba(30,40,60,0.08);
+  }
+}

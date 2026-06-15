@@ -10,6 +10,7 @@
 // does NOT break at edges, uses fixed spacing, and does not spawn parallel neighbours — so
 // it lays a single bold line along each silhouette/feature boundary.
 
+import { CancelledError } from '../types'
 import { Field } from './field'
 
 export interface Stroke {
@@ -33,6 +34,7 @@ export interface PlaceParams {
   mode?: 'tone' | 'contour'
   edgeThresh?: number // contour: edge strength to trace
   contourWidth?: number // contour: line width
+  cancel?: () => boolean // polled during placement; throws CancelledError if true (Q18)
 }
 
 const H = 0.9 // integration step (px)
@@ -132,6 +134,7 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
     let ord = ord0
     let first = true
     for (let step = 0; step < MAX_STEPS; step++) {
+      if ((step & 511) === 0 && p.cancel?.()) throw new CancelledError()
       if (x < 0 || y < 0 || x >= w || y >= h) break
       if (!inkable(x, y)) break
       if (!isContour && step > 1 && edgeAt(x, y) > EDGE_BREAK) break
@@ -219,7 +222,9 @@ export function placeStreamlines(field: Field, darkness: Float32Array, p: PlaceP
   for (const s of initial) seeds.push(s[1], s[2])
 
   let head = 0
+  let seedTick = 0
   while (head < seeds.length) {
+    if ((seedTick++ & 1023) === 0 && p.cancel?.()) throw new CancelledError()
     const sx = seeds[head++]
     const sy = seeds[head++]
     grow(sx, sy)

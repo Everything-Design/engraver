@@ -1,20 +1,51 @@
 // Pure engraving compute: image pixels + structure params -> stroke geometry.
 // Runs inside the Web Worker. Deterministic (seeded RNG) so re-renders are stable.
 
-import { StructureParams } from '../types'
+import { CancelledError, EngraveInput, EngraveTimings, StructureParams } from '../types'
 import { computeField, Field } from './field'
 import { placeStreamlines, Stroke } from './streamlines'
 
-export interface EngraveInput {
-  data: Uint8ClampedArray
-  width: number
-  height: number
-}
+export type { EngraveInput }
 
 export interface EngraveResult {
   w: number
   h: number
   strokes: Stroke[]
+  timings: EngraveTimings
+}
+
+// Per-source compute cache (Q17). Luminance is derived once; the structure-tensor field is
+// keyed by its smoothing radius so it survives re-tunes that don't touch flowSmoothness.
+export interface EngraveCache {
+  lum: Float32Array
+  w: number
+  h: number
+  field?: Field
+  fieldRadius?: number
+}
+
+export interface EngraveOptions {
+  // Polled at pass boundaries; if it returns true the job is abandoned (Q18).
+  cancel?: () => boolean
+  // Awaited between passes so the worker can drain its message queue and notice a
+  // superseding request before spending more cycles (Q18).
+  yieldPass?: () => Promise<void>
+}
+
+const now = () =>
+  typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+
+// Build the per-source cache (luminance pass). Cheap; the expensive field is built lazily.
+export function makeCache(img: EngraveInput): EngraveCache {
+  const w = img.width
+  const h = img.height
+  const data = img.data
+  const n = w * h
+  const lum = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    lum[i] = (0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]) / 255
+  }
+  return { lum, w, h }
 }
 
 function makeRng(seed: number): () => number {
@@ -117,16 +148,20 @@ function stippleStrokes(strokes: Stroke[], darkness: Float32Array, w: number, h:
   return out
 }
 
-export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
-  const w = img.width
-  const h = img.height
-  const data = img.data
+export async function engrave(
+  cache: EngraveCache,
+  s: StructureParams,
+  opts: EngraveOptions = {},
+): Promise<EngraveResult> {
+  const { lum, w, h } = cache
   const n = w * h
-
-  const lum = new Float32Array(n)
-  for (let i = 0; i < n; i++) {
-    lum[i] = (0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]) / 255
+  const { cancel, yieldPass } = opts
+  const checkpoint = async () => {
+    if (yieldPass) await yieldPass()
+    if (cancel?.()) throw new CancelledError()
   }
+
+  const tStart = now()
 
   // Tone transfer -> banded darkness. ROUND so light areas drop to band 0 = bare paper.
   const levels = Math.max(2, Math.round(s.tonalLevels))
@@ -140,17 +175,29 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
     darkness[i] = band / levels
   }
 
+  // Field cache (Q17): rebuild the structure tensor only when its smoothing radius changes.
+  const tField = now()
   const radius = Math.round(2 + s.flowSmoothness * 8)
-  const field = computeField(lum, w, h, radius)
+  let field = cache.field
+  if (!field || cache.fieldRadius !== radius) {
+    field = computeField(lum, w, h, radius)
+    cache.field = field
+    cache.fieldRadius = radius
+  }
 
   // Region-planar snapping for the hatch passes (Building); contours still use the raw field.
+  // Re-snapped per request — it's cheap and depends on planarRegions, not on the cached field.
   const hatchField = s.planarRegions ? snapFieldToPlanar(field, 4) : field
   const hatchFlow = s.planarRegions ? 1 : s.flowWeight
+  const fieldMs = now() - tField
 
   const baseAngle = (s.baseAngle * Math.PI) / 180
   const rng = makeRng(0x9e3779b9)
 
+  const tPlace = now()
+
   // Primary hatch set, then stipple its lightest band into flicks.
+  await checkpoint()
   let primary = placeStreamlines(hatchField, darkness, {
     basePitch: s.basePitch,
     spacingRatio: s.spacingRatio,
@@ -163,6 +210,7 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
     angleOffset: 0,
     darknessGate: 0,
     rng,
+    cancel,
   })
   primary = stippleStrokes(primary, darkness, w, h, levels, s.stippleTransition)
 
@@ -170,6 +218,7 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
 
   // Cross-hatch set: rotated 90°, gated to darker tones only.
   if (s.crossHatch > 0.01) {
+    await checkpoint()
     const gate = 0.82 - 0.5 * s.crossHatch
     const cross = placeStreamlines(hatchField, darkness, {
       basePitch: s.basePitch * 1.1,
@@ -183,12 +232,14 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
       angleOffset: Math.PI / 2,
       darknessGate: gate,
       rng,
+      cancel,
     })
     strokes = strokes.concat(cross)
   }
 
   // Contour set: bold outlines traced ALONG strong edges (drawn last, on top).
   if (s.edgeStrength > 0.01) {
+    await checkpoint()
     const edgeThresh = 0.52 - 0.2 * s.edgeStrength // higher = only strong silhouette edges
     const contour = placeStreamlines(field, darkness, {
       basePitch: Math.max(2.5, s.basePitch * 0.9),
@@ -205,9 +256,11 @@ export function engrave(img: EngraveInput, s: StructureParams): EngraveResult {
       mode: 'contour',
       edgeThresh,
       contourWidth: s.strokeWidth * (1.0 + 0.4 * s.edgeStrength),
+      cancel,
     })
     strokes = strokes.concat(contour)
   }
 
-  return { w, h, strokes }
+  const placeMs = now() - tPlace
+  return { w, h, strokes, timings: { field: fieldMs, place: placeMs, total: now() - tStart } }
 }

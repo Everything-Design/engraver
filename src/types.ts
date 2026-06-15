@@ -35,6 +35,52 @@ export interface EngraveParams {
   style: StyleParams
 }
 
+// Bump when the param model or engine output changes in a way that invalidates saved
+// presets (e.g. field resolution change in M2/B5). Embedded in saved JSON (Q15).
+export const PRESET_VERSION = 1
+
+// ---- Worker protocol (Q16): one discriminated union shared by App + worker ----
+
+export interface EngraveInput {
+  data: Uint8ClampedArray
+  width: number
+  height: number
+}
+
+export interface EngraveTimings {
+  field: number // ms to build/snap the orientation field
+  place: number // ms to place all streamline passes
+  total: number // ms for the whole engrave() call
+}
+
+export type WorkerRequest =
+  // 'source' carries the working-res pixels (transferred, not cloned) and is sent once
+  // per image; the worker caches them + the structure-tensor field (Q17).
+  | { kind: 'source'; id: number; img: EngraveInput; params: StructureParams }
+  // 'params' reuses the cached source/field — just re-places streamlines.
+  | { kind: 'params'; id: number; params: StructureParams }
+
+export type WorkerResponse =
+  | {
+      kind: 'result'
+      id: number
+      w: number
+      h: number
+      coords: Float32Array
+      widths: Float32Array
+      lengths: Uint32Array
+      timings: EngraveTimings
+    }
+  | { kind: 'error'; id: number; message: string }
+
+// Thrown by the compute core when a job is superseded; the worker swallows it (Q18).
+export class CancelledError extends Error {
+  constructor() {
+    super('engrave cancelled')
+    this.name = 'CancelledError'
+  }
+}
+
 export interface Duotone {
   name: string
   ink: string

@@ -18,7 +18,59 @@ export interface Field {
   edge: Float32Array // edge strength 0..1 (normalized gradient magnitude)
 }
 
-export function computeField(lum: Float32Array, w: number, h: number, smoothRadius: number): Field {
+// Edge-Tangent-Flow refinement (Q5). A few iterations sharpen the director field into
+// coherent flow: each tangent is pulled toward its better-oriented, higher-coherence
+// neighbours. Tangents are 180°-ambiguous, so neighbour contributions are sign-aligned
+// (φ) before accumulation. Cheap (small radius) and noticeably steadier hatch direction.
+function etfSmooth(
+  dirx: Float32Array,
+  diry: Float32Array,
+  coh: Float32Array,
+  w: number,
+  h: number,
+  radius: number,
+  iters: number,
+) {
+  const nx = new Float32Array(dirx.length)
+  const ny = new Float32Array(diry.length)
+  for (let it = 0; it < iters; it++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x
+        const cx = dirx[i], cy = diry[i]
+        let ax = 0, ay = 0
+        for (let dy = -radius; dy <= radius; dy++) {
+          const yy = y + dy
+          if (yy < 0 || yy >= h) continue
+          for (let dx = -radius; dx <= radius; dx++) {
+            const xx = x + dx
+            if (xx < 0 || xx >= w) continue
+            const j = yy * w + xx
+            const dot = cx * dirx[j] + cy * diry[j]
+            const phi = dot >= 0 ? 1 : -1 // sign-align (direction-agnostic)
+            // magnitude weight = neighbour coherence; directional weight = |alignment|
+            const wgt = coh[j] * Math.abs(dot)
+            ax += phi * wgt * dirx[j]
+            ay += phi * wgt * diry[j]
+          }
+        }
+        const len = Math.hypot(ax, ay)
+        if (len > 1e-6) { nx[i] = ax / len; ny[i] = ay / len }
+        else { nx[i] = cx; ny[i] = cy }
+      }
+    }
+    dirx.set(nx)
+    diry.set(ny)
+  }
+}
+
+export function computeField(
+  lum: Float32Array,
+  w: number,
+  h: number,
+  smoothRadius: number,
+  etfIters = 2,
+): Field {
   const idx = (x: number, y: number) => {
     const cx = x < 0 ? 0 : x >= w ? w - 1 : x
     const cy = y < 0 ? 0 : y >= h ? h - 1 : y
@@ -89,6 +141,8 @@ export function computeField(lum: Float32Array, w: number, h: number, smoothRadi
     const disc = Math.sqrt((xx - yy) * (xx - yy) + 4 * xy * xy)
     coh[i] = trace > 1e-6 ? Math.min(1, disc / trace) : 0
   }
+
+  if (etfIters > 0) etfSmooth(dirx, diry, coh, w, h, 2, etfIters)
 
   const edgeS = blur(edge, 1)
   return { w, h, dirx, diry, coh, edge: edgeS }

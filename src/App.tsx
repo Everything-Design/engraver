@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Controls } from './components/Controls'
-import { classifyImage, PRESETS, StyleKey } from './engine/presets'
+import { PRESETS, StyleKey } from './engine/presets'
+import { analyze } from './engine/analyze'
+import { mapToParams } from './engine/autoParams'
 import { drawEngraving, PackedStrokes } from './render/strokeCanvas'
 import { DEFAULT_PARAMS, EngraveParams, StructureParams } from './types'
 
@@ -74,6 +76,7 @@ export default function App() {
   const [hasImage, setHasImage] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notes, setNotes] = useState<string[]>([])
 
   // Draw the current packed strokes into the canvas, fit to the stage.
   const render = useCallback(() => {
@@ -157,14 +160,17 @@ export default function App() {
     })
   }, [scheduleRecompute])
 
-  // Shared: classify, build the working ImageData, apply the matched preset (which recomputes).
+  // Auto-tune: measure the image and derive every dial + a suggested duotone, then recompute.
   const processBitmap = useCallback((bitmap: ImageBitmap) => {
-    const detected = classifyImage(bitmap)
+    const auto = mapToParams(analyze(bitmap))
     sourceRef.current = toFieldImageData(bitmap, FIELD_LONG)
-    setAutoStyle(detected)
+    setAutoStyle(null)
+    setStyle(null)
+    setNotes(['Auto-tuned for this image', ...auto.notes])
     setHasImage(true)
-    applyStyle(detected)
-  }, [applyStyle])
+    setParams({ structure: auto.structure, style: auto.style })
+    scheduleRecompute(auto.structure)
+  }, [scheduleRecompute])
 
   const handleUpload = useCallback(async (file: File) => {
     setError(null)
@@ -272,6 +278,15 @@ export default function App() {
       />
       <main className="stage" ref={stageRef}>
         {error && <div className="stage__error">{error}</div>}
+        {hasImage && notes.length > 0 && (
+          <div style={{
+            position: 'absolute', top: 14, left: 14, right: 14, fontSize: 11,
+            color: '#5b6470', background: 'rgba(255,255,255,0.82)', padding: '7px 11px',
+            borderRadius: 9, lineHeight: 1.45, pointerEvents: 'none',
+          }}>
+            {notes.join('  ·  ')}
+          </div>
+        )}
         {!hasImage && !error && (
           <div className="stage__empty">
             <p>Upload an image to begin.</p>
